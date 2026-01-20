@@ -7,7 +7,10 @@ A web application to **issue, store, verify, and download internship certificate
 ## Features
 
 - **User Roles & Authentication**
-  - Admin login (Firebase Authentication)
+  - Admin registration and login (Firebase Authentication)
+  - **Email/Password** authentication
+  - **Google Sign-In** (redirect-based, no popup blockers)
+  - Automatic admin claim assignment after registration
   - Role-based access control (Admin-only actions protected)
   - Backend verifies Firebase ID tokens (Firebase Admin SDK)
 
@@ -33,21 +36,40 @@ A web application to **issue, store, verify, and download internship certificate
 
 ## Tech Stack
 
-- **Frontend**: React + Vite, React Router, Tailwind CSS / Bootstrap
-- **Backend**: Node.js, Express.js
-- **Database**: MongoDB (Mongoose)
-- **Auth**: Firebase Authentication (client) + Firebase Admin SDK (server-side token verification)
-- **Excel Parsing**: `multer`, `xlsx`
-- **PDF Generation**: `pdf-lib` (or Puppeteer for HTML-to-PDF templates)
+- **Frontend**: 
+  - React 18 + Vite
+  - React Router (client-side routing)
+  - Firebase Authentication (Email/Password + Google)
+  - Modern CSS (inline styles with dark theme)
+- **Backend**: 
+  - Node.js + Express.js
+  - Firebase Admin SDK (token verification)
+  - MongoDB with Mongoose
+- **File Processing**: 
+  - `multer` (file uploads)
+  - `xlsx` (Excel parsing)
+  - `pdf-lib` (PDF generation)
+- **Validation**: 
+  - `zod` (schema validation)
 
 ---
 
-## Project Structure (Suggested)
+## Project Structure
 
 ```
 AMDOX-TASK2/
-  client/                 # React frontend
+  client/                 # React frontend (Vite)
+    src/
+      pages/              # Home, Verify, Admin pages
+      lib/                # Firebase config, API client
+    .env                  # Frontend environment variables
   server/                 # Express backend
+    src/
+      routes/             # API routes (auth, certificates)
+      models/             # MongoDB models
+      middleware/         # Auth middleware
+      lib/                # DB connection, Firebase Admin
+    .env                  # Backend environment variables
   README.md
 ```
 
@@ -55,14 +77,16 @@ AMDOX-TASK2/
 
 ## Prerequisites
 
-- **Node.js** (LTS recommended)
+- **Node.js** (v18+ recommended, v22 tested)
+- **npm** (comes with Node.js)
 - **MongoDB Atlas account** (free tier) or local MongoDB
+- **Firebase account** (free tier)
 
 ---
 
 ## Environment Variables
 
-Create a `.env` file inside `server/`:
+Create a `.env` file inside `server/` (copy `server/env.example`):
 
 ```env
 PORT=5000
@@ -75,7 +99,7 @@ FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY----
 
 > Never commit `.env` files to GitHub.
 
-Create a `.env` file inside `client/`:
+Create a `.env` file inside `client/` (copy `client/env.example`):
 
 ```env
 VITE_API_BASE_URL=http://localhost:5000
@@ -113,19 +137,25 @@ Upload an `.xlsx` file containing **one sheet** with the following headers (reco
 
 ---
 
-## API Endpoints (Proposed)
+## API Endpoints
 
-### Auth (Firebase)
-Authentication happens via **Firebase Auth on the frontend**. For protected APIs, send:
-- Header: `Authorization: Bearer <firebase_id_token>`
+### Auth
+- `POST /api/auth/set-admin-claim` *(Requires authentication)*
+  - Sets `admin: true` custom claim for the authenticated user
+  - Used automatically after registration
+  - Headers: `Authorization: Bearer <firebase_id_token>`
 
 ### Certificates
 - `POST /api/certificates/import` *(Admin only)*
   - Form-data: `file` = `.xlsx`
-- `GET /api/certificates/:certificateId`
+  - Returns: `{ inserted, updated, failed, total }`
+  - Headers: `Authorization: Bearer <firebase_id_token>`
+- `GET /api/certificates/:certificateId` *(Public)*
   - Returns certificate details for verification
-- `GET /api/certificates/:certificateId/pdf`
-  - Returns downloadable PDF
+  - Response: `{ certificate: {...} }`
+- `GET /api/certificates/:certificateId/pdf` *(Public)*
+  - Returns downloadable PDF file
+  - Content-Type: `application/pdf`
 
 ---
 
@@ -194,47 +224,81 @@ Use **Cloudflare Pages** or **Vercel** (free tier):
   - Set `VITE_API_BASE_URL` in Project Settings → Environment Variables
 
 ### CORS Note
-Make sure your backend `CORS_ORIGIN` matches your deployed frontend URL.
+Make sure your backend `CORS_ORIGIN` matches your deployed frontend URL. For multiple origins, use comma-separated values:
+```env
+CORS_ORIGIN=http://localhost:5173,https://your-frontend-domain.com
+```
+
+### Firebase Authorized Domains
+When deploying, add your frontend domain to Firebase Console:
+- **Authentication → Settings → Authorized domains**
+- Add your deployed domain (e.g., `your-app.vercel.app`)
 
 ---
 
-## Firebase Auth Setup (Recommended)
+## Firebase Auth Setup
 
 ### 1) Create Firebase Project
-- Create a Firebase project
-- Enable **Authentication → Sign-in method → Email/Password** (and Google if needed)
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Create a new project (or use existing)
+3. **Enable Authentication:**
+   - Go to **Authentication → Sign-in method**
+   - Enable **Email/Password** (required)
+   - Enable **Google** (optional, for Google sign-in)
+   - Click **Save**
 
-### 2) Create Web App (Frontend config)
-- Firebase Console → Project Settings → Your apps → Web app
-- Copy values into `client/.env` (`VITE_FIREBASE_*`)
+### 2) Get Frontend Config (Web App)
+1. Firebase Console → **Project Settings → General**
+2. Scroll to **"Your apps"** section
+3. Click **"Add app" → Web** (or use existing web app)
+4. Copy the config values into `client/.env`:
+   ```env
+   VITE_FIREBASE_API_KEY=...
+   VITE_FIREBASE_AUTH_DOMAIN=...
+   VITE_FIREBASE_PROJECT_ID=...
+   VITE_FIREBASE_STORAGE_BUCKET=...
+   VITE_FIREBASE_MESSAGING_SENDER_ID=...
+   VITE_FIREBASE_APP_ID=...
+   ```
 
-### 3) Create Service Account (Backend verification)
-- Firebase Console → Project Settings → Service accounts
-- Generate a new private key JSON
-- Put these into `server/.env`:
-  - `FIREBASE_PROJECT_ID`
-  - `FIREBASE_CLIENT_EMAIL`
-  - `FIREBASE_PRIVATE_KEY`
+### 3) Get Backend Config (Service Account)
+1. Firebase Console → **Project Settings → Service accounts**
+2. Click **"Generate new private key"**
+3. Download the JSON file
+4. Extract these values into `server/.env`:
+   ```env
+   FIREBASE_PROJECT_ID=your-project-id
+   FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxx@your-project.iam.gserviceaccount.com
+   FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   ```
+   > **Important:** Keep the `\n` characters in `FIREBASE_PRIVATE_KEY` exactly as shown.
 
-### 4) Admin Role (Two common options)
-- **Option A (recommended): Firebase Custom Claims**
-  - Set `admin: true` on specific Firebase users via Admin SDK
-  - Backend checks claim to protect admin routes (like Excel import)
-- **Option B: MongoDB role mapping**
-  - Store `{ uid, role }` in MongoDB
-  - Backend checks DB for role on each request
+### 4) Admin Role Setup
+- **Firebase Custom Claims** (implemented)
+  - After registration, the app automatically sets `admin: true` custom claim
+  - Backend middleware checks this claim to protect admin routes
+  - No manual setup required - just register/login and admin access is granted
 
 ---
 
-## Admin Setup (Recommended)
+## Admin Setup
 
-You can choose one approach:
+### Registration Flow
+1. Go to **Admin** page (`/admin`)
+2. Click **"Register New Admin"** tab
+3. Enter email and password (min 6 characters)
+4. Click **"Register"**
+5. Admin claim is set automatically
+6. Sign out and sign in again to activate admin access
 
-- **Firebase Custom Claims (best)**
-  - Create one admin account in Firebase Auth (email/password)
-  - Run a one-time script to set `admin: true` claim for that user
-- **MongoDB role mapping**
-  - Insert your admin `uid` in a `users` collection with role `admin`
+### Login Options
+- **Email/Password**: Use registered credentials
+- **Google Sign-In**: Click "Sign in with Google" (redirect-based, no popup blockers)
+
+### First-Time Setup
+- The first admin must register via the **"Register New Admin"** option
+- Subsequent admins can also register themselves
+- All registered users automatically get admin permissions
 
 ---
 
@@ -253,16 +317,24 @@ You can choose one approach:
 
 ## Usage (Quick Demo Flow)
 
-- **Admin**
-  - Login
-  - Upload Excel file from the dashboard
-  - Confirm import summary (inserted/updated/failed rows)
+### Admin Workflow
+1. **Register/Login**
+   - Go to `/admin` page
+   - Register new admin OR login with existing credentials
+   - Or use Google Sign-In
+2. **Import Certificates**
+   - After login, the "Import Certificates" section appears
+   - Upload Excel file (`.xlsx` format)
+   - View import summary (inserted/updated/failed rows)
 
-- **Student / Verifier**
-  - Open verification page
-  - Enter **Certificate ID**
-  - View certificate details
-  - Download the PDF
+### Student/Verifier Workflow
+1. **Verify Certificate**
+   - Go to `/verify` page (or click "Verify Certificate" on home)
+   - Enter **Certificate ID**
+   - View certificate details
+2. **Download PDF**
+   - Click "Download PDF" button
+   - Certificate is downloaded as PDF file
 
 ---
 
@@ -283,12 +355,58 @@ Then reference them in this README (example):
 
 ---
 
+## Troubleshooting
+
+### Firebase Authentication Errors
+
+**Error: `auth/operation-not-allowed`**
+- **Solution**: Enable Email/Password in Firebase Console
+  - Go to Firebase Console → Authentication → Sign-in method
+  - Enable "Email/Password"
+  - Click Save
+
+**Error: `auth/popup-blocked` (Google Sign-In)**
+- **Solution**: Already fixed! The app uses redirect-based Google sign-in (no popups)
+- If you still see this, ensure popups are allowed in browser settings
+
+**Error: `Missing Firebase config`**
+- **Solution**: Check your `client/.env` file
+- Ensure all `VITE_FIREBASE_*` variables are set
+- Restart the frontend dev server after changing `.env`
+
+### Backend Errors
+
+**Error: `Missing MONGODB_URI`**
+- **Solution**: Check your `server/.env` file
+- Ensure `MONGODB_URI` is set with your MongoDB Atlas connection string
+- Restart the backend server after changing `.env`
+
+**Error: `Invalid Firebase private key`**
+- **Solution**: Ensure `FIREBASE_PRIVATE_KEY` in `server/.env` includes:
+  - Quotes around the entire key: `"-----BEGIN...-----END PRIVATE KEY-----\n"`
+  - `\n` characters preserved (don't replace with actual newlines)
+
+### Import Errors
+
+**Excel import fails silently**
+- Check browser console for errors
+- Ensure Excel file has correct headers (see Excel Import Format section)
+- Verify admin is logged in and has admin claim
+
+**Certificate not found**
+- Verify the Certificate ID is correct (case-sensitive)
+- Check MongoDB to ensure certificate was imported successfully
+
+---
+
 ## Roadmap (Optional Enhancements)
 
 - QR code on certificates linking to `/verify/:certificateId`
 - Import preview before saving to DB
 - Audit logs for imports (who imported, when, summary)
 - Email certificate to student (can be done with free-tier providers, optional)
+- Certificate template customization
+- Bulk certificate download
 
 ---
 
